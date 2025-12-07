@@ -1,0 +1,100 @@
+name: blog-website
+
+services:
+  redis:
+    image: redis:7-alpine
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  web:
+    build: .
+    entrypoint: ["sh", "-c", "chmod +x /app/entrypoint.sh || true; exec /app/entrypoint.sh"]
+    volumes:
+      - .:/app
+      - ./staticfiles:/app/staticfiles
+      - ./media:/app/media
+    ports:
+      - "8008:8008"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    environment:
+      ROLE: web
+      PORT: 8008
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "python3 manage.py showmigrations django_celery_beat | grep '\\[X\\] 0001_initial' >/dev/null 2>&1" ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks: [backend]
+
+  celery:
+    build: .
+    volumes:
+      - .:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    environment:
+      ROLE: worker
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+    depends_on:
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_started
+    networks: [backend]
+
+  celery-beat:
+    build: .
+    volumes:
+      - .:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    environment:
+      ROLE: beat
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+    depends_on:
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    restart: on-failure
+    networks: [backend]
+
+volumes:
+  media_volume:
+
+networks:
+  backend:
+    driver: bridge
